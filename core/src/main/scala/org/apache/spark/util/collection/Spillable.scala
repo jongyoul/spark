@@ -69,12 +69,14 @@ private[spark] trait Spillable[C] extends Logging {
    * @return true if `collection` was spilled to disk; false otherwise
    */
   protected def maybeSpill(collection: C, currentMemory: Long): Boolean = {
+    logDebug("maybeSpill started")
     if (elementsRead % 32 == 0 && currentMemory >= myMemoryThreshold) {
       // Claim up to double our current memory from the shuffle memory pool
       val amountToRequest = 2 * currentMemory - myMemoryThreshold
       val granted = shuffleMemoryManager.tryToAcquire(amountToRequest)
       myMemoryThreshold += granted
       if (myMemoryThreshold <= currentMemory) {
+        logDebug("if (myMemoryThreshold <= currentMemory)")
         // We were granted too little memory to grow further (either tryToAcquire returned 0,
         // or we already had more memory than myMemoryThreshold); spill the current collection
         _spillCount += 1
@@ -86,9 +88,11 @@ private[spark] trait Spillable[C] extends Logging {
         // Keep track of spills, and release memory
         _memoryBytesSpilled += currentMemory
         releaseMemoryForThisThread()
+        logDebug("maybeSpill ended")
         return true
       }
     }
+    logDebug("maybeSpill ended")
     false
   }
 

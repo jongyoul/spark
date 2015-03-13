@@ -188,10 +188,16 @@ private[spark] class ExternalSorter[K, V, C](
   private val spills = new ArrayBuffer[SpilledFile]
 
   def insertAll(records: Iterator[_ <: Product2[K, V]]): Unit = {
+    logDebug("insertAll started")
     // TODO: stop combining if we find that the reduction factor isn't high
     val shouldCombine = aggregator.isDefined
+    logDebug(s"shouldCombine: [$shouldCombine]")
+    
+    //For debug
+    var count: Int = 0
 
     if (shouldCombine) {
+      logDebug("if(shouldCombine)")
       // Combine values in-memory first using our AppendOnlyMap
       val mergeValue = aggregator.get.mergeValue
       val createCombiner = aggregator.get.createCombiner
@@ -202,10 +208,12 @@ private[spark] class ExternalSorter[K, V, C](
       while (records.hasNext) {
         addElementsRead()
         kv = records.next()
+        count = count + 1
         map.changeValue((getPartition(kv._1), kv._1), update)
         maybeSpillCollection(usingMap = true)
       }
     } else if (bypassMergeSort) {
+      logDebug("if(shouldCombine) else if (bypassMergeSort)")
       // SPARK-4479: Also bypass buffering if merge sort is bypassed to avoid defensive copies
       if (records.hasNext) {
         spillToPartitionFiles(records.map { kv =>
@@ -213,6 +221,7 @@ private[spark] class ExternalSorter[K, V, C](
         })
       }
     } else {
+      logDebug("if(shouldCombine) else if (bypassMergeSort) else")
       // Stick values into our buffer
       while (records.hasNext) {
         addElementsRead()
@@ -221,6 +230,7 @@ private[spark] class ExternalSorter[K, V, C](
         maybeSpillCollection(usingMap = false)
       }
     }
+    logDebug(s"insertAll ended. count = $count")
   }
 
   /**
@@ -229,19 +239,23 @@ private[spark] class ExternalSorter[K, V, C](
    * @param usingMap whether we're using a map or buffer as our current in-memory collection
    */
   private def maybeSpillCollection(usingMap: Boolean): Unit = {
+    logDebug("maybeSpillCollection started")
     if (!spillingEnabled) {
       return
     }
 
     if (usingMap) {
+      logDebug("if (usingMap)")
       if (maybeSpill(map, map.estimateSize())) {
         map = new SizeTrackingAppendOnlyMap[(Int, K), C]
       }
     } else {
+      logDebug("if (usingMap) else")
       if (maybeSpill(buffer, buffer.estimateSize())) {
         buffer = new SizeTrackingPairBuffer[(Int, K), C]
       }
     }
+    logDebug("maybeSpillCollection ended")
   }
 
   /**
@@ -347,6 +361,7 @@ private[spark] class ExternalSorter[K, V, C](
   }
 
   private def spillToPartitionFiles(iterator: Iterator[((Int, K), C)]): Unit = {
+    logDebug(s"spillToPartitionFiles started")
     assert(bypassMergeSort)
 
     // Create our file writers if we haven't done so yet
@@ -361,14 +376,20 @@ private[spark] class ExternalSorter[K, V, C](
       }
     }
 
+    // For Debug
+    var count: Int = 0
+    
     // No need to sort stuff, just write each element out
     while (iterator.hasNext) {
       val elem = iterator.next()
+      count = count + 1
       val partitionId = elem._1._1
       val key = elem._1._2
       val value = elem._2
       partitionWriters(partitionId).write((key, value))
     }
+    
+    logDebug(s"spillToPartitionFiles ended. count = ${count}")
   }
 
   /**
